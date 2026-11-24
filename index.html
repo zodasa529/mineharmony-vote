@@ -563,6 +563,11 @@
             doSubmit();
         }
 
+        // ==================== 投票中转地址 (Cloudflare Worker) ====================
+        // 部署后把下面换成你的 Worker 域名, 例如 https://vote-relay.你的子域.workers.dev
+        const WORKER_URL = 'https://YOUR-WORKER.workers.dev';
+        const FORM_KEY = 'main'; // main=委员80人
+
         function doSubmit() {
             const checkboxes = document.querySelectorAll('.vote-item input[type="checkbox"]');
             const selected = [];
@@ -572,17 +577,32 @@
                 }
             });
 
-            // 保存到 localStorage
-            const votes = JSON.parse(localStorage.getItem('votes') || '[]');
-            votes.push({
-                time: new Date().toISOString(),
-                selected: selected
-            });
-            localStorage.setItem('votes', JSON.stringify(votes));
-            // 标记已投票（防重复）
-            localStorage.setItem('hasVoted', 'true');
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 正在提交…';
 
-            applyVotedState();
+            fetch(WORKER_URL + '/vote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected, form: FORM_KEY })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res && res.ok) {
+                    // 本地标记已投(设备级防重复)
+                    localStorage.setItem('hasVoted', 'true');
+                    applyVotedState();
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '✅ 提交选票';
+                    alert('提交失败：' + (res && res.error ? res.error : '网络错误') + '\n请检查网络后重试');
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.textContent = '✅ 提交选票';
+                alert('提交失败：' + err.message + '\n请检查网络后重试');
+            });
         }
 
         // 应用"已投票"状态：禁用所有复选框 + 按钮变提示语
@@ -607,17 +627,35 @@
             document.getElementById('qrModal').classList.remove('active');
         }
 
-        // ==================== 结果弹窗 ====================
-        function showResultModal() {
-            const votes = JSON.parse(localStorage.getItem('votes') || '[]');
-            const totalVotes = votes.length;
+        // ==================== 结果弹窗 (读 GitHub votes.json 全场实时汇总) ====================
+        const VOTES_JSON = 'https://zodasa529.github.io/mineharmony-vote/votes.json';
 
+        function showResultModal() {
+            document.getElementById('resultModal').classList.add('active');
+            document.getElementById('resultStats').innerHTML = '<div class="stat"><div class="stat-value">…</div><div class="stat-label">加载中</div></div>';
+            document.getElementById('resultBody').innerHTML = '';
+            loadResults();
+        }
+
+        async function loadResults() {
+            let votes = [];
+            try {
+                const r = await fetch(VOTES_JSON + '?t=' + Date.now());
+                if (r.ok) votes = await r.json();
+                if (!Array.isArray(votes)) votes = [];
+            } catch (e) {
+                votes = [];
+            }
+            renderResults(votes);
+        }
+
+        function renderResults(votes) {
+            const totalVotes = votes.length;
             const countMap = {};
             candidates.forEach(c => countMap[c.name] = 0);
-            votes.forEach(v => v.selected.forEach(name => {
+            votes.forEach(v => (v.selected || []).forEach(name => {
                 if (countMap[name] !== undefined) countMap[name]++;
             }));
-
             const sorted = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
 
             document.getElementById('resultStats').innerHTML = `
@@ -648,8 +686,6 @@
                     </tr>
                 `;
             }).join('');
-
-            document.getElementById('resultModal').classList.add('active');
         }
 
         function closeResultModal() {
