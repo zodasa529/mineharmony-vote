@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📊 选举实时统计 · 管理端</title>
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Microsoft YaHei','Segoe UI',sans-serif; background:#f5f6fa; min-height:100vh; }
+    .container { max-width:900px; margin:0 auto; padding:20px; }
+    .header { text-align:center; padding:35px 20px; background:linear-gradient(120deg,#001a4d 0%,#003399 45%,#0a4fc0 75%,#002a7a 100%); color:#fff; border-radius:15px; margin-bottom:18px; position:relative; overflow:hidden; box-shadow:inset 0 0 50px rgba(0,60,160,.45); }
+    .header::before { content:""; position:absolute; top:0; left:-60%; width:50%; height:100%; background:linear-gradient(90deg,transparent 0%,rgba(120,200,255,.2) 50%,transparent 100%); transform:skewX(-20deg); animation:glow 5s ease-in-out infinite; pointer-events:none; }
+    @keyframes glow { 0%{left:-60%} 50%{left:110%} 100%{left:-60%} }
+    .header h1 { font-size:1.6em; position:relative; z-index:1; letter-spacing:1px; text-shadow:0 0 12px rgba(120,200,255,.55); }
+    .toolbar { display:flex; gap:10px; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
+    .toolbar .info { font-size:.85em; color:#888; }
+    .toolbar .btns { display:flex; gap:8px; }
+    .btn { padding:8px 16px; border:none; border-radius:6px; font-size:.85em; cursor:pointer; transition:.2s; }
+    .btn-refresh { background:#2980b9; color:#fff; }
+    .btn-refresh:hover { background:#1a5276; }
+    .btn-auto { background:#27ae60; color:#fff; }
+    .btn-auto.off { background:#95a5a6; }
+    .section { background:#fff; border-radius:12px; box-shadow:0 3px 15px rgba(0,0,0,.08); margin-bottom:20px; overflow:hidden; }
+    .section-head { padding:14px 18px; background:linear-gradient(90deg,#003399,#0a4fc0); color:#fff; display:flex; justify-content:space-between; align-items:center; }
+    .section-head h2 { font-size:1.05em; }
+    .section-head .stat-mini { font-size:.85em; opacity:.9; }
+    .stats-row { display:flex; gap:14px; padding:14px 18px; background:#f8f9fa; border-bottom:1px solid #eee; flex-wrap:wrap; }
+    .stat { flex:1; min-width:100px; text-align:center; }
+    .stat-value { font-size:1.7em; font-weight:bold; color:#2980b9; }
+    .stat-label { font-size:.78em; color:#888; margin-top:2px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:9px 14px; text-align:left; border-bottom:1px solid #f0f0f0; font-size:.9em; }
+    th { background:#f8f9fa; color:#666; font-weight:bold; position:sticky; top:0; }
+    tbody tr:hover { background:#f8fbff; }
+    .bar-container { width:100%; height:20px; background:#ecf0f1; border-radius:10px; overflow:hidden; position:relative; }
+    .bar-fill { height:100%; background:linear-gradient(90deg,#2980b9 0%,#3498db 100%); border-radius:10px; transition:width .5s ease; }
+    .bar-text { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:.75em; font-weight:bold; color:#333; }
+    .rank-1 td:nth-child(2) { color:#e67e22; font-weight:bold; }
+    .empty { text-align:center; padding:40px; color:#aaa; }
+    .table-wrap { max-height:520px; overflow-y:auto; }
+    @media(max-width:600px){ .header h1{font-size:1.25em} .stat-value{font-size:1.3em} }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><h1>📊 矿鸿联盟工作委员会选举<br>实时统计 · 管理端</h1></div>
+
+    <div class="toolbar">
+        <span class="info" id="lastUpdate">尚未加载</span>
+        <div class="btns">
+            <button class="btn btn-auto" id="autoBtn" onclick="toggleAuto()">⏸ 自动刷新:开</button>
+            <button class="btn btn-refresh" onclick="refreshAll()">🔄 立即刷新</button>
+        </div>
+    </div>
+
+    <!-- 委员选举 -->
+    <div class="section">
+        <div class="section-head"><h2>① 委员选举（80人候选）</h2><span class="stat-mini" id="mainMini"></span></div>
+        <div class="stats-row" id="mainStats"></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th style="width:50px">排名</th><th style="width:110px">姓名</th><th style="width:60px">票数</th><th>支持率</th></tr></thead>
+                <tbody id="mainBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 主任副主任 -->
+    <div class="section">
+        <div class="section-head"><h2>② 主任 / 副主任委员选举（7人候选）</h2><span class="stat-mini" id="deputyMini"></span></div>
+        <div class="stats-row" id="deputyStats"></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th style="width:50px">排名</th><th style="width:110px">姓名</th><th style="width:60px">票数</th><th>支持率</th></tr></thead>
+                <tbody id="deputyBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+// ==================== 候选人名单 ====================
+const mainCands = [
+'安郁熙','安月阳','包建军','曹安业','常圣强','陈国辉','陈海峰','陈华州','陈朋朋','陈瑞强',
+'陈小俊','陈智宇','崔科飞','窦涛','段威','范素芳','顾荣强','韩雷','郝志伟','何凯',
+'何龙','黄晓俊','惠博','冀虎','景杰','李刚','李震','连维瑞','梁沫','林恩强',
+'林江','刘波','刘航','刘建文','刘克娜','刘文韬','刘毅','马开德','马宁博','孟磊',
+'孟祥军','孟亚光','欧阳龙水','潘伟','蒲军','谌晓欢','舒应秋','宋冰清','宋振铎','孙鹏亮',
+'王东君','王华东','王辉','王剑','吴海宇','吴劲松','谢旭阳','谢阳','辛凤阳','徐辉',
+'徐驿凡','许芝光','薛凯','薛卫平','杨大明','杨康平','杨霖','杨文嘉','杨旭','叶良东',
+'应科','张广超','张衡','张万军','赵家骅','赵艳伟','周军','朱凯','訾晓军','邹文'
+];
+const deputyCands = ['吴海宇','郝志伟','刘波','宋振铎','徐辉','陈海峰','杨霖'];
+
+const BASE = 'https://zodasa529.github.io/mineharmony-vote/';
+let autoTimer = null;
+let autoOn = true;
+
+async function fetchVotes(file) {
+    try {
+        const r = await fetch(BASE + file + '?t=' + Date.now());
+        if (!r.ok) return [];
+        const d = await r.json();
+        return Array.isArray(d) ? d : [];
+    } catch(e) { return []; }
+}
+
+function buildTable(cands, votes, bodyId, statsId, miniId) {
+    const totalVotes = votes.length;
+    const countMap = {};
+    cands.forEach(n => countMap[n] = 0);
+    votes.forEach(v => (v.selected||[]).forEach(n => { if(countMap[n]!==undefined) countMap[n]++; }));
+    const sorted = Object.entries(countMap).sort((a,b)=>b[1]-a[1]);
+
+    document.getElementById(statsId).innerHTML = `
+        <div class="stat"><div class="stat-value">${totalVotes}</div><div class="stat-label">已收票数</div></div>
+        <div class="stat"><div class="stat-value">${cands.length}</div><div class="stat-label">候选人</div></div>
+        <div class="stat"><div class="stat-value">${sorted.filter(x=>x[1]>0).length}</div><div class="stat-label">有票人数</div></div>`;
+    document.getElementById(miniId).textContent = totalVotes > 0 ? ('已收 ' + totalVotes + ' 票') : '暂无数据';
+
+    if (totalVotes === 0) {
+        document.getElementById(bodyId).innerHTML = '<tr><td colspan="4" class="empty">暂无投票数据</td></tr>';
+        return;
+    }
+    document.getElementById(bodyId).innerHTML = sorted.map(([name,cnt],i) => {
+        const pct = ((cnt/totalVotes)*100).toFixed(1);
+        const bw = (cnt/totalVotes)*100;
+        return `<tr class="${i===0?'rank-1':''}">
+            <td>${i+1}</td><td><strong>${name}</strong></td><td>${cnt}</td>
+            <td><div class="bar-container"><div class="bar-fill" style="width:${bw}%"></div><span class="bar-text">${pct}%</span></div></td>
+        </tr>`;
+    }).join('');
+}
+
+async function refreshAll() {
+    const [mv, dv] = await Promise.all([fetchVotes('votes.json'), fetchVotes('votes2.json')]);
+    buildTable(mainCands, mv, 'mainBody', 'mainStats', 'mainMini');
+    buildTable(deputyCands, dv, 'deputyBody', 'deputyStats', 'deputyMini');
+    document.getElementById('lastUpdate').textContent = '最近更新：' + new Date().toLocaleTimeString('zh-CN');
+}
+
+function toggleAuto() {
+    autoOn = !autoOn;
+    const b = document.getElementById('autoBtn');
+    if (autoOn) {
+        b.textContent = '⏸ 自动刷新:开'; b.classList.remove('off');
+        autoTimer = setInterval(refreshAll, 8000);
+    } else {
+        b.textContent = '▶ 自动刷新:关'; b.classList.add('off');
+        clearInterval(autoTimer);
+    }
+}
+
+refreshAll();
+autoTimer = setInterval(refreshAll, 8000);
+</script>
+</body>
+</html>
