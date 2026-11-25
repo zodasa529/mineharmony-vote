@@ -510,38 +510,40 @@
             doSubmit();
         }
 
-        // ==================== 投票中转地址 (Cloudflare Worker) ====================
-        const WORKER_URL = 'https://YOUR-WORKER.workers.dev';
-        const FORM_KEY = 'deputy'; // deputy=主任副主任7人 -> votes2.json
+        // ==================== 投票中转地址 (金数据 API) ====================
+        const JSD_TOKEN = 'gdp_h9KRfjTfg5N8XckzuV691nppEWapvN0cburFi0f5Zf4';
+        const JSD_FORM  = 'JsgquY'; // 主任副主任7人
+        const JSD_BASE  = 'https://jinshuju.net/api/v1/forms/' + JSD_FORM;
+        // 姓名 -> choice value 映射（金数据后台的choice值）
+        const VALUE_MAP = { "吴海宇":"WuHY", "郝志伟":"HaoZW", "刘波":"LiuB", "宋振铎":"SongZD", "徐辉":"XuH", "陈海峰":"ChenHF", "杨霖":"YangL" };
 
         function doSubmit() {
             const checkboxes = document.querySelectorAll('.vote-item input[type="checkbox"]');
-            const selected = [];
+            const values = [];
             checkboxes.forEach(cb => {
                 if (cb.checked) {
-                    selected.push(candidates[parseInt(cb.dataset.index)].name);
+                    const nm = candidates[parseInt(cb.dataset.index)].name;
+                    if (VALUE_MAP[nm]) values.push(VALUE_MAP[nm]);
                 }
             });
+            if (values.length === 0) { alert('请至少选择一位候选人'); return; }
 
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
             btn.textContent = '⏳ 正在提交…';
 
-            fetch(WORKER_URL + '/vote', {
+            fetch(JSD_BASE + '/entries', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ selected, form: FORM_KEY })
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + JSD_TOKEN },
+                body: JSON.stringify({ field_1: values })
             })
-            .then(r => r.json())
-            .then(res => {
-                if (res && res.ok) {
-                    localStorage.setItem(STORE_VOTED, 'true');
-                    applyVotedState();
-                } else {
-                    btn.disabled = false;
-                    btn.textContent = '✅ 提交选票';
-                    alert('提交失败：' + (res && res.error ? res.error : '网络错误') + '\n请检查网络后重试');
-                }
+            .then(r => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(() => {
+                localStorage.setItem(STORE_VOTED, 'true');
+                applyVotedState();
             })
             .catch(err => {
                 btn.disabled = false;
@@ -572,8 +574,8 @@
             document.getElementById('qrModal').classList.remove('active');
         }
 
-        // ==================== 结果弹窗 (读 GitHub votes2.json 全场实时汇总) ====================
-        const VOTES_JSON = 'https://zodasa529.github.io/mineharmony-vote/votes2.json';
+        // ==================== 结果弹窗 (金数据 API 全场实时汇总) ====================
+        const VALUE_TO_NAME = {}; Object.keys(VALUE_MAP).forEach(n => VALUE_TO_NAME[VALUE_MAP[n]] = n);
 
         function showResultModal() {
             document.getElementById('resultModal').classList.add('active');
@@ -583,24 +585,28 @@
         }
 
         async function loadResults() {
-            let votes = [];
+            let entries = [];
             try {
-                const r = await fetch(VOTES_JSON + '?t=' + Date.now());
-                if (r.ok) votes = await r.json();
-                if (!Array.isArray(votes)) votes = [];
-            } catch (e) {
-                votes = [];
-            }
-            renderResults(votes);
+                const r = await fetch(JSD_BASE + '/entries?per_page=500', {
+                    headers: { 'Authorization': 'Bearer ' + JSD_TOKEN }
+                });
+                if (r.ok) {
+                    const d = await r.json();
+                    entries = d.data || [];
+                }
+            } catch (e) { entries = []; }
+            renderResults(entries);
         }
 
-        function renderResults(votes) {
-            const totalVotes = votes.length;
-            const countMap = {};
-            candidates.forEach(c => countMap[c.name] = 0);
-            votes.forEach(v => (v.selected || []).forEach(name => {
-                if (countMap[name] !== undefined) countMap[name]++;
-            }));
+        function renderResults(entries) {
+            const totalVotes = entries.length;
+            const countMap = {}; candidates.forEach(c => countMap[c.name] = 0);
+            entries.forEach(e => {
+                (e.field_1 || []).forEach(v => {
+                    const nm = VALUE_TO_NAME[v];
+                    if (nm && countMap[nm] !== undefined) countMap[nm]++;
+                });
+            });
             const sorted = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
 
             document.getElementById('resultStats').innerHTML = `
